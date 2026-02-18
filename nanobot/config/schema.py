@@ -162,6 +162,10 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class SupermemoryConfig(BaseModel):
+    api_key : str = ""          # Supermemory API key
+    container_tag: str = ""     # Tag to identify this bot's memory container in Supermemory (e.g. "nanobot-memory")
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -273,6 +277,10 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    
+    # Supermemory configuration for intelligent memory management. If api_key is provided
+    # Supermemory will be used as the agent's memory backend instead of local files. 
+    supermemory : SupermemoryConfig = Field(default_factory=SupermemoryConfig)
 
     @property
     def workspace_path(self) -> Path:

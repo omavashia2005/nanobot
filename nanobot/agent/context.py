@@ -6,9 +6,8 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-
+from nanobot.agent.super_memory import SupermemoryStore
 
 class ContextBuilder:
     """
@@ -22,10 +21,10 @@ class ContextBuilder:
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory = SupermemoryStore()        # Use Supermemory for enhanced memory capabilities
         self.skills = SkillsLoader(workspace)
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(self, skill_names: list[str] | None = None, query : str | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
@@ -45,10 +44,13 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
         
-        # Memory context
-        memory = self.memory.get_memory_context()
+        # Memory context now uses supermemory for enhanced capabilities
+        # Add current query to memory for context
+        memory = self.memory.get_memory_context(query=query)  
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+        
+        print("CURRENT MEMORY FROM THIS QUERY: ", memory)
         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -147,7 +149,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt(skill_names, query=current_message)
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
