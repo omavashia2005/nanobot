@@ -23,6 +23,8 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
 from nanobot.agent.super_memory import SupermemoryStore
+from nanobot.agent.memory import MemoryStore
+from nanobot.config import load_config
 
 class AgentLoop:
     """
@@ -82,6 +84,11 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        
+        if load_config().supermemory.api_key:
+            self.memory = SupermemoryStore(workspace)
+        else:
+            self.memory = MemoryStore(workspace)
         
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -260,7 +267,6 @@ class AgentLoop:
         
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
-        memory = SupermemoryStore()
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -311,7 +317,8 @@ class AgentLoop:
         self.sessions.save(session)
         
         # update memory with final content
-        memory.add_memory(final_content)
+        if (isinstance(self.memory, SupermemoryStore)):
+            self.memory.add_memory(final_content)
 
         return OutboundMessage(
             channel=msg.channel,
@@ -328,7 +335,6 @@ class AgentLoop:
         the response back to the correct destination.
         """
         logger.info(f"Processing system message from {msg.sender_id}")
-        memory = SupermemoryStore()
 
         # Parse origin from chat_id (format: "channel:chat_id")
         if ":" in msg.chat_id:
@@ -343,7 +349,7 @@ class AgentLoop:
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
         self._set_tool_context(origin_channel, origin_chat_id)
-        initial_messages = await self.context.build_messages(
+        initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
             channel=origin_channel,
@@ -359,7 +365,8 @@ class AgentLoop:
         self.sessions.save(session)
         
         # update memory with final content
-        memory.add_memory(final_content)
+        if isinstance(self.memory, SupermemoryStore):
+            self.memory.add_memory(final_content)
 
         return OutboundMessage(
             channel=origin_channel,
@@ -374,7 +381,6 @@ class AgentLoop:
             archive_all: If True, clear all messages and reset session (for /new command).
                        If False, only write to files without modifying session.
         """
-        memory = SupermemoryStore()
 
         if archive_all:
             old_messages = session.messages
@@ -403,21 +409,34 @@ class AgentLoop:
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
         conversation = "\n".join(lines)
-        current_memory = memory.get_user_long_term_memory()
+        
+        # Load current long-term memory to provide context for consolidation. 
+        # This allows the LLM to update existing facts rather than just append new ones.
+
+        default_history_prompt = "A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later."
+        supermemory_history_prompt = "A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Include enough detail to be useful when found by semantic search later."
+
+        if isinstance(self.memory, MemoryStore):
+            current_memory = self.memory.read_long_term()
+        
+        else:
+            current_memory = self.memory.get_user_long_term_memory()
+            default_history_prompt = supermemory_history_prompt
 
         prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
 
-1. "history_entry": A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Include enough detail to be useful when found by semantic search later.
+                1. "history_entry": {default_history_prompt}
 
-2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
+                2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
 
-## Current Long-term Memory
-{current_memory or "(empty)"}
+                ## Current Long-term Memory
+                {current_memory or "(empty)"}
 
-## Conversation to Process
-{conversation}
+                ## Conversation to Process
+                {conversation}
 
-Respond with ONLY valid JSON, no markdown fences."""
+                Respond with ONLY valid JSON, no markdown fences.
+                """
 
         try:
             response = await self.provider.chat(
@@ -438,10 +457,17 @@ Respond with ONLY valid JSON, no markdown fences."""
                 logger.warning(f"Memory consolidation: unexpected response type, skipping. Response: {text[:200]}")
                 return
 
-            if entry := result.get("memory_update"):
-                memory.add_memory(entry)
-            if entry := result.get("history_entry"):
-                memory.add_memory(entry)
+            if (isinstance(self.memory, SupermemoryStore)):
+                if entry := result.get("memory_update"):
+                    self.memory.add_memory(entry)
+                if entry := result.get("history_entry"):
+                    self.memory.add_memory(entry)
+            else:
+                 if entry := result.get("history_entry"):
+                    self.memory.append_history(entry)
+                 if update := result.get("memory_update"):
+                    if update != current_memory:
+                        self.memory.write_long_term(update)
 
             if archive_all:
                 session.last_consolidated = 0
@@ -471,7 +497,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             The agent's response.
         """
         await self._connect_mcp()
-        memory  = SupermemoryStore()
+
         msg = InboundMessage(
             channel=channel,
             sender_id="user",
@@ -481,5 +507,8 @@ Respond with ONLY valid JSON, no markdown fences."""
         
         response = await self._process_message(msg, session_key=session_key)
         response_content = response.content if response else ""
-        memory.add_memory(response_content)
+        
+        if (isinstance(self.memory, SupermemoryStore)):
+            self.memory.add_memory(response_content)
+        
         return response_content 

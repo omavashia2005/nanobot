@@ -8,6 +8,9 @@ from typing import Any
 
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.super_memory import SupermemoryStore
+from nanobot.config.loader import load_config
+from nanobot.agent.memory import MemoryStore
+from loguru import logger
 
 class ContextBuilder:
     """
@@ -21,8 +24,15 @@ class ContextBuilder:
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.memory = SupermemoryStore()        # Use Supermemory for enhanced memory capabilities
+        self.config = load_config()
+        
+        if self.config.supermemory.api_key: 
+            self.memory = SupermemoryStore(workspace)       # Use Supermemory for enhanced memory capabilities
+        else:
+            self.memory = MemoryStore(workspace)
+
         self.skills = SkillsLoader(workspace)
+
     
     def build_system_prompt(self, skill_names: list[str] | None = None, query : str | None = None) -> str:
         """
@@ -46,12 +56,18 @@ class ContextBuilder:
         
         # Memory context now uses supermemory for enhanced capabilities
         # Add current query to memory for context
-        memory = self.memory.get_memory_context(query=query)  
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
+        try:
+            memory = self.memory.get_context(query=query)  
+            if memory:
+                parts.append(f"# Memory\n\n{memory}")
         
-        print("CURRENT MEMORY FROM THIS QUERY: ", memory)
-        
+        except Exception as e:
+            logger.error(f"Error loading context into supermemory: {e}")
+            logger.error("Falling back to basic memory loading")
+            memory = self.memory.get_memory_context()
+            if memory:
+                parts.append(f"# Memory\n\n{memory}")
+                        
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
         always_skills = self.skills.get_always_skills()
