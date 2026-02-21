@@ -6,10 +6,14 @@ import platform
 from pathlib import Path
 from typing import Any
 
+from datetime import datetime
+import time as _time
+
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.super_memory import SupermemoryStore
 from nanobot.config.loader import load_config
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.prompt_library import PromptLibrary
 from loguru import logger
 
 class ContextBuilder:
@@ -32,6 +36,8 @@ class ContextBuilder:
             self.memory = MemoryStore(workspace)
 
         self.skills = SkillsLoader(workspace)
+
+        self.prompt_library = PromptLibrary(workspace)
 
     
     def build_system_prompt(self, skill_names: list[str] | None = None, query : str | None = None) -> str:
@@ -58,6 +64,7 @@ class ContextBuilder:
         # Add current query to memory for context
         try:
             memory = self.memory.get_context(query=query)  
+            print(memory)
             if memory:
                 parts.append(f"# Memory\n\n{memory}")
         
@@ -79,54 +86,24 @@ class ContextBuilder:
         # 2. Available skills: only show summary (agent uses read_file to load)
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
-            parts.append(f"""# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
+            parts.append(self.prompt_library.skill_prompt(skills_summary))
         
         return "\n\n---\n\n".join(parts)
     
     def _get_identity(self) -> str:
         """Get the core identity section."""
-        from datetime import datetime
-        import time as _time
+
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
-        return f"""# nanobot 🐈
-
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
-- Read, write, and edit files
-- Execute shell commands
-- Search the web and fetch web pages
-- Send messages to users on chat channels
-- Spawn subagents for complex background tasks
-
-## Current Time
-{now} ({tz})
-
-## Runtime
-{runtime}
-
-## Workspace
-Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-
-IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
-Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
-For normal conversation, just respond with text - do not call the message tool.
-
-Always be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.
-When remembering something important, write to {workspace_path}/memory/MEMORY.md
-To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     
+        if isinstance(self.memory, SupermemoryStore):
+            return self.prompt_library.build_identity_prompt_supermemory(now, tz, runtime)
+            
+        return self.prompt_library.build_identity_prompt(now, tz, runtime, workspace_path)
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []

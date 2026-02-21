@@ -128,9 +128,10 @@ class SessionManager:
             logger.warning(f"Failed to load session {key}: {e}")
             return None
     
-    def save(self, session: Session) -> None:
+    def save(self, session: Session, save_path=None) -> None:
         """Save a session to disk."""
-        path = self._get_session_path(session.key)
+
+        path =  save_path if save_path is not None else self._get_session_path(session.key)
 
         with open(path, "w") as f:
             metadata_line = {

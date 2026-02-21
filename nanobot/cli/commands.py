@@ -20,6 +20,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from nanobot import __version__, __logo__
 from nanobot.config.schema import Config
+from nanobot.logging_config import configure_logging, set_console_logging
 
 app = typer.Typer(
     name="nanobot",
@@ -29,6 +30,9 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+
+# Configure global logging once: always file-backed, console enabled by default.
+configure_logging(console=True)
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -445,7 +449,6 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
     from nanobot.cron.service import CronService
-    from loguru import logger
     
     config = load_config()
     
@@ -456,10 +459,7 @@ def agent(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    if logs:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
+    set_console_logging(logs)
     
     agent_loop = AgentLoop(
         bus=bus,

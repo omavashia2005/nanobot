@@ -42,7 +42,6 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "mcp>=1.0.0",
     "json-repair>=0.30.0",
-    "supermemory",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +49,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
+    "supermemory",
 ]
 
 [project.scripts]

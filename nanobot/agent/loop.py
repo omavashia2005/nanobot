@@ -25,6 +25,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.agent.super_memory import SupermemoryStore
 from nanobot.agent.memory import MemoryStore
 from nanobot.config import load_config
+from nanobot.agent.prompt_library import PromptLibrary
 
 class AgentLoop:
     """
@@ -94,6 +95,7 @@ class AgentLoop:
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
+        self.prompt_library = PromptLibrary(workspace)
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -250,6 +252,23 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
     
+
+    async def run_command(self, command: str, session : Session, msg : InboundMessage, clear_session : bool) -> OutboundMessage:
+        messages_to_archive = session.messages.copy()
+        if clear_session:
+            session.clear()
+            self.sessions.save(session)
+            self.sessions.invalidate(session.key)
+
+        async def _consolidate_and_cleanup():
+            temp_session = Session(key=session.key)
+            temp_session.messages = messages_to_archive
+            await self._consolidate_memory(temp_session, archive_all=True)
+
+        asyncio.create_task(_consolidate_and_cleanup())
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                            content="New session started. Memory consolidation in progress.")
+
     async def _process_message(self, msg: InboundMessage, session_key: str | None = None) -> OutboundMessage | None:
         """
         Process a single inbound message.
@@ -274,25 +293,36 @@ class AgentLoop:
         # Handle slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
+            messages = session.get_history()
+            metadata = session.metadata
+            if metadata:
+                messages.append({"role": "system", "metadata": metadata})
+            
             # Capture messages before clearing (avoid race condition with background task)
-            messages_to_archive = session.messages.copy()
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
+            if isinstance(self.memory, SupermemoryStore):
+                try:
+                    
+                    response = self.memory.update_conversation(messages, session)
+                    
+                    if response:
+                        logger.info(f"Conversation uploaded to Supermemory for session {session.key}")
+                        asyncio.create_task(self.memory.clear_failed_sessions())
+                        return await self.run_command(cmd, session, msg, clear_session=True)
+                    else:
+                        logger.warning(f"Failed to update conversation in Supermemory for session {session.key}, running backup consolidation")
+                        return await self.run_command(cmd, session, msg, clear_session=False)
 
-            async def _consolidate_and_cleanup():
-                temp_session = Session(key=session.key)
-                temp_session.messages = messages_to_archive
-                await self._consolidate_memory(temp_session, archive_all=True)
+                except Exception as e:
+                    logger.error(f"Error during Supermemory update for session {session.key}: {e}, running backup consolidation")
+                    return await self.run_command(cmd, session, msg, clear_session=False)
+            else:
+                return await self.run_command(cmd, session, msg, clear_session=True)
 
-            asyncio.create_task(_consolidate_and_cleanup())
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
         
-        if len(session.messages) > self.memory_window:
+        if isinstance(self.memory, MemoryStore) and len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
 
         self._set_tool_context(msg.channel, msg.chat_id)
@@ -316,10 +346,6 @@ class AgentLoop:
                             tools_used=tools_used if tools_used else None)
         self.sessions.save(session)
         
-        # update memory with final content
-        if (isinstance(self.memory, SupermemoryStore)):
-            self.memory.add_memory(final_content)
-
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -364,10 +390,6 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         
-        # update memory with final content
-        if isinstance(self.memory, SupermemoryStore):
-            self.memory.add_memory(final_content)
-
         return OutboundMessage(
             channel=origin_channel,
             chat_id=origin_chat_id,
@@ -403,40 +425,30 @@ class AgentLoop:
             logger.info(f"Memory consolidation started: {len(session.messages)} total, {len(old_messages)} new to consolidate, {keep_count} keep")
 
         lines = []
+        conversation : str | None = None
         for m in old_messages:
             if not m.get("content"):
                 continue
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
         conversation = "\n".join(lines)
-        
+    
         # Load current long-term memory to provide context for consolidation. 
         # This allows the LLM to update existing facts rather than just append new ones.
 
-        default_history_prompt = "A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later."
-        supermemory_history_prompt = "A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Include enough detail to be useful when found by semantic search later."
+        default_history_prompt = self.prompt_library.default_history_prompt
+        supermemory_history_prompt = self.prompt_library.supermemory_history_prompt
 
-        if isinstance(self.memory, MemoryStore):
-            current_memory = self.memory.read_long_term()
-        
-        else:
+        if isinstance(self.memory, SupermemoryStore):
             current_memory = self.memory.get_user_long_term_memory()
             default_history_prompt = supermemory_history_prompt
+        else:
+            current_memory = self.memory.read_long_term()
 
-        prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
-
-                1. "history_entry": {default_history_prompt}
-
-                2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
-
-                ## Current Long-term Memory
-                {current_memory or "(empty)"}
-
-                ## Conversation to Process
-                {conversation}
-
-                Respond with ONLY valid JSON, no markdown fences.
-                """
+        if conversation is not None:
+            prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory, conversation)
+        else:
+            prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory)
 
         try:
             response = await self.provider.chat(
@@ -477,6 +489,7 @@ class AgentLoop:
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
 
+
     async def process_direct(
         self,
         content: str,
@@ -507,8 +520,5 @@ class AgentLoop:
         
         response = await self._process_message(msg, session_key=session_key)
         response_content = response.content if response else ""
-        
-        if (isinstance(self.memory, SupermemoryStore)):
-            self.memory.add_memory(response_content)
         
         return response_content 
