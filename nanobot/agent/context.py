@@ -64,7 +64,6 @@ class ContextBuilder:
         # Add current query to memory for context
         try:
             memory = self.memory.get_context(query=query)  
-            print(memory)
             if memory:
                 parts.append(f"# Memory\n\n{memory}")
         

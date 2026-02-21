@@ -68,8 +68,6 @@ class SupermemoryStore():
         try:
             url = self.base_url + "/conversations"
             
-            print(messages)
-
             payload = {
                         "conversationId": f"session_{self.container_tag}",
                         "messages": messages,
@@ -81,8 +79,6 @@ class SupermemoryStore():
 
             response = requests.post(url, json=payload, headers=headers)
             
-            print(f"Supermemory API response: {response.status_code} - {response.text}")
-
             if response.status_code != 200:
                 logger.error(f"Failed to update conversation in Supermemory: {response.text}")
                 raise Exception(f"Supermemory API error: {response.status_code} - {response.text}")
