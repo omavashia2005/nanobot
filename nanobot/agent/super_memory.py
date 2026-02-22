@@ -8,7 +8,7 @@ import requests
 from nanobot.session import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir
 import json
-import time
+import asyncio
 
 """
 Intelligent memory system using https://supermemory.ai
@@ -40,7 +40,7 @@ class SupermemoryStore():
                     messages = [json.loads(line) for line in file]
                 
                 if i % 3 == 0:
-                    time.sleep(2)  # Sleep to avoid hitting rate limits
+                    await asyncio.sleep(2)  # Sleep to avoid hitting rate limits
                 
                 await self.update_conversation(messages, None)  # Pass None for session since we're not saving failed sessions here
 
@@ -142,7 +142,7 @@ class SupermemoryStore():
             relevant_chunks, relevant_memories = [], []
             
             for res in results:
-                relevant_memories += res.get("memory")
+                relevant_memories += res.get("memory", [])
                 relevant_chunks += res.get("chunks", [])
 
             context = f"""
