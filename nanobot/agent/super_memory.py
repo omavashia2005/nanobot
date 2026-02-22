@@ -57,13 +57,6 @@ class SupermemoryStore():
         
     
     async def update_conversation(self, messages : List[dict], session : Session | None) -> bool:
-
-        """
-            TODO: 
-            -   Add update conversation logic instead of adding new memories 
-                everytime this function is called for better memory extraction
-        """
-
         try:
             url = self.base_url + "/conversations"
             
