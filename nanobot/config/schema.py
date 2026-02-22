@@ -162,7 +162,7 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
-class SupermemoryConfig(BaseModel):
+class SupermemoryConfig(Base):
     api_key : str = ""          # Supermemory API key
     container_tag: str = ""     # Tag to identify this bot's memory container in Supermemory (e.g. "nanobot-memory")
 
