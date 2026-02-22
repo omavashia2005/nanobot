@@ -1,5 +1,10 @@
 from nanobot.agent.memory import MemoryStore
-from supermemory import Supermemory
+
+try:
+    from supermemory import Supermemory
+except ImportError:
+    Supermemory = None
+
 from nanobot.config.loader import load_config
 from loguru import logger
 from pathlib import Path
@@ -9,6 +14,7 @@ from nanobot.session import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir
 import json
 import asyncio
+import httpx
 
 """
 Intelligent memory system using https://supermemory.ai
@@ -18,6 +24,10 @@ class SupermemoryStore():
     Agent memory using Supermemory for persistent, searchable, and structured memory.
     """
     def __init__(self, workspace: Path):
+        if Supermemory is None:
+            raise ImportError("Supermemory library is not installed."
+                              "Please install it with `pip install supermemory`.")
+
         config = load_config()
         self.api_key = config.supermemory.api_key
         self.container_tag = config.supermemory.container_tag or "nanobot_memory"
@@ -37,18 +47,19 @@ class SupermemoryStore():
             try:
                 # parse session file and extract messages 
                 with session_file.open("r") as file:
-                    messages = [json.loads(line) for line in file]
+                    raw = [json.loads(line) for line in file]
+                    messages = [m for m in raw if m.get("_type") != "metadata"]
                 
                 if i % 3 == 0:
                     await asyncio.sleep(2)  # Sleep to avoid hitting rate limits
                 
-                await self.update_conversation(messages, None)  # Pass None for session since we're not saving failed sessions here
+                success = await self.update_conversation(messages, None)  # Pass None for session since we're not saving failed sessions here
 
-                logger.info(f"Parsed messages from failed session file: {session_file}")
-                
-                session_file.unlink()
-        
-                logger.info(f"Deleted failed session file: {session_file}")
+                if success:
+                    logger.info(f"Parsed messages from failed session file: {session_file}")
+                    session_file.unlink()
+                else:    
+                    logger.info(f"Deleted failed session file: {session_file}. Keeping for next attempt")
                 
                 i += 1
         
@@ -56,38 +67,43 @@ class SupermemoryStore():
                 logger.error(f"Error deleting failed session file {session_file}: {e}")
         
     
-    async def update_conversation(self, messages : List[dict], session : Session | None) -> bool:
+
+    async def update_conversation(self,messages: List[dict],session: Session | None) -> bool:
+        url = f"{self.base_url}/conversations"
+
+        payload = {
+            "conversationId": f"session_{self.container_tag}",
+            "messages": messages,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
         try:
-            url = self.base_url + "/conversations"
-            
-            payload = {
-                        "conversationId": f"session_{self.container_tag}",
-                        "messages": messages,
-                    }
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-                    }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                )
 
-            response = requests.post(url, json=payload, headers=headers)
-            
             if response.status_code != 200:
-                logger.error(f"Failed to update conversation in Supermemory: {response.text}")
-                raise Exception(f"Supermemory API error: {response.status_code} - {response.text}")
-
+                logger.error(f"Failed to update conversation in Supermemory: "f"{response.status_code} - {response.text}")
+                raise Exception(f"Supermemory API error: " f"{response.status_code} - {response.text}")
             return True
-        
         except Exception as e:
             logger.exception(f"Error while updating conversation in Supermemory: {e}")
+
             if session is not None:
-                session_path = self.sessions_dir / f"{session.key.replace(':', '_')}.jsonl"
-                self.session_manager.save(session, session_path)  # Save the session to failed_sessions for later retry
+                session_path = (self.sessions_dir / f"{session.key.replace(':', '_')}.jsonl")
+                self.session_manager.save(session, session_path)
             else:
                 logger.error("No session provided to save failed conversation.")
             
             return False
-        
-    
+
     def add_memory(self, content: str):
         try:
             """Add a new memory entry."""

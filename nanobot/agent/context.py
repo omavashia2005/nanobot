@@ -10,7 +10,6 @@ from datetime import datetime
 import time as _time
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.super_memory import SupermemoryStore
 from nanobot.config.loader import load_config
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.prompt_library import PromptLibrary
@@ -27,7 +26,7 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path, memory=MemoryStore):
+    def __init__(self, workspace: Path, memory):
         self.workspace = workspace
         self.config = load_config()
         
@@ -61,17 +60,10 @@ class ContextBuilder:
         
         # Memory context now uses supermemory for enhanced capabilities
         # Add current query to memory for context
-        try:
-            memory = self.memory.get_context(query=query)  
-            if memory:
-                parts.append(f"# Memory\n\n{memory}")
-        
-        except Exception as e:
-            logger.error(f"Error loading context into supermemory: {e}")
-            logger.error("Falling back to basic memory loading")
-            memory = self.memory.get_memory_context()
-            if memory:
-                parts.append(f"# Memory\n\n{memory}")
+
+        memory = self.memory.get_memory_context(query=query)
+        if memory:
+            parts.append(f"# Memory\n\n{memory}")
                         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -96,7 +88,9 @@ class ContextBuilder:
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-    
+        
+        from nanobot.agent.super_memory import SupermemoryStore
+        
         if isinstance(self.memory, SupermemoryStore):
             return self.prompt_library.build_identity_prompt_supermemory(now, tz, runtime)
             

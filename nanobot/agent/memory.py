@@ -27,3 +27,7 @@ class MemoryStore:
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    def get_context(self, query: str = None) -> str:
+        """Get memory context. Query param ignored for local storage."""
+        return self.get_memory_context()

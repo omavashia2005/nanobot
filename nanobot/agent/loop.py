@@ -22,7 +22,6 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
-from nanobot.agent.super_memory import SupermemoryStore
 from nanobot.agent.memory import MemoryStore
 from nanobot.config import load_config
 from nanobot.agent.prompt_library import PromptLibrary
@@ -72,6 +71,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
 
         if load_config().supermemory.api_key:
+            from nanobot.agent.super_memory import SupermemoryStore
             self.memory = SupermemoryStore(workspace)
         else:
             self.memory = MemoryStore(workspace)
@@ -299,6 +299,7 @@ class AgentLoop:
             if metadata:
                 messages.append({"role": "system", "metadata": metadata})
             
+            from nanobot.agent.super_memory import SupermemoryStore
             # Capture messages before clearing (avoid race condition with background task)
             if isinstance(self.memory, SupermemoryStore):
                 try:
@@ -439,18 +440,17 @@ class AgentLoop:
 
         default_history_prompt = self.prompt_library.default_history_prompt
         supermemory_history_prompt = self.prompt_library.supermemory_history_prompt
-
+        
+        from nanobot.agent.super_memory import SupermemoryStore
         if isinstance(self.memory, SupermemoryStore):
             current_memory = self.memory.get_user_long_term_memory()
             default_history_prompt = supermemory_history_prompt
         else:
             current_memory = self.memory.read_long_term()
 
-        if conversation is not None:
+        if conversation:
             prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory, conversation)
-        else:
-            prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory)
-
+            
         try:
             response = await self.provider.chat(
                 messages=[
