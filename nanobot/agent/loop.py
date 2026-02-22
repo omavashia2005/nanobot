@@ -448,6 +448,10 @@ class AgentLoop:
         # Load current long-term memory to provide context for consolidation. 
         # This allows the LLM to update existing facts rather than just append new ones.
 
+        if not conversation:
+            logger.debug("No conversation content to consolidate, skipping")
+            return    
+
         default_history_prompt = self.prompt_library.default_history_prompt
         supermemory_history_prompt = self.prompt_library.supermemory_history_prompt
         
@@ -458,10 +462,6 @@ class AgentLoop:
         else:
             current_memory = self.memory.read_long_term()
 
-        if not conversation:
-            logger.debug("No conversation content to consolidate, skipping")
-            return    
-        
         prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory, conversation)
         
         try:
