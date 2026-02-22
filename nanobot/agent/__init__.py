@@ -6,4 +6,4 @@ from nanobot.agent.memory import MemoryStore
 # from nanobot.agent.super_memory import SupermemoryStore
 from nanobot.agent.skills import SkillsLoader
 
-__all__ = ["AgentLoop", "ContextBuilder", "MemoryStore", "SupermemoryStore", "SkillsLoader"]
+__all__ = ["AgentLoop", "ContextBuilder", "MemoryStore", "SkillsLoader"]

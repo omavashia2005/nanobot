@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+import inspect
 import json
 import json_repair
 from pathlib import Path
@@ -303,12 +304,21 @@ class AgentLoop:
             # Capture messages before clearing (avoid race condition with background task)
             if isinstance(self.memory, SupermemoryStore):
                 try:
-                    
-                    response = await self.memory.update_conversation(messages, session)
+                    upload_result = self.memory.update_conversation(messages, session)
+                    response = (
+                        await upload_result
+                        if inspect.isawaitable(upload_result)
+                        else upload_result
+                    )
                     
                     if response:
                         logger.info(f"Conversation uploaded to Supermemory for session {session.key}")
-                        asyncio.create_task(self.memory.clear_failed_sessions())
+                        async def _clear_failed_sessions():
+                            replay_result = self.memory.clear_failed_sessions()
+                            if inspect.isawaitable(replay_result):
+                                await replay_result
+
+                        asyncio.create_task(_clear_failed_sessions())
                         return await self.run_command(cmd, session, msg, clear_session=True)
                     else:
                         logger.warning(f"Failed to update conversation in Supermemory for session {session.key}, running backup consolidation")
@@ -448,9 +458,12 @@ class AgentLoop:
         else:
             current_memory = self.memory.read_long_term()
 
-        if conversation:
-            prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory, conversation)
-            
+        if not conversation:
+            logger.debug("No conversation content to consolidate, skipping")
+            return    
+        
+        prompt = self.prompt_library.history_prompt(default_history_prompt, current_memory, conversation)
+        
         try:
             response = await self.provider.chat(
                 messages=[

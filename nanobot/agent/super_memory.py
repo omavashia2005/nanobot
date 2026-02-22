@@ -14,7 +14,7 @@ from nanobot.session import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir
 import json
 import asyncio
-import httpx
+import inspect
 
 """
 Intelligent memory system using https://supermemory.ai
@@ -37,6 +37,12 @@ class SupermemoryStore():
         self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "failed_sessions")
         self.session_manager = SessionManager(workspace)
 
+    @staticmethod
+    async def _maybe_await(value):
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
 
     async def clear_failed_sessions(self):
         """Clear all failed sessions from the failed_sessions directory."""
@@ -51,15 +57,18 @@ class SupermemoryStore():
                     messages = [m for m in raw if m.get("_type") != "metadata"]
                 
                 if i % 3 == 0:
-                    await asyncio.sleep(2)  # Sleep to avoid hitting rate limits
+                    # Tests may monkeypatch asyncio.sleep with a sync stub.
+                    await self._maybe_await(asyncio.sleep(2))
                 
-                success = await self.update_conversation(messages, None)  # Pass None for session since we're not saving failed sessions here
+                success = await self._maybe_await(
+                    self.update_conversation(messages, None)
+                )  # Pass None for session since we're not saving failed sessions here
 
                 if success:
                     logger.info(f"Parsed messages from failed session file: {session_file}")
                     session_file.unlink()
                 else:    
-                    logger.info(f"Deleted failed session file: {session_file}. Keeping for next attempt")
+                    logger.info(f"Failed replay for session file: {session_file}. Keeping for next attempt")
                 
                 i += 1
         
@@ -82,12 +91,12 @@ class SupermemoryStore():
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    url,
-                    json=payload,
-                    headers=headers,
-                )
+            response = await asyncio.to_thread(
+                requests.post,
+                url,
+                json=payload,
+                headers=headers,
+            )
 
             if response.status_code != 200:
                 logger.error(f"Failed to update conversation in Supermemory: "f"{response.status_code} - {response.text}")
@@ -170,4 +179,3 @@ class SupermemoryStore():
         except Exception as e:
             logger.error(f"Failed to get memory context from Supermemory: {e}")
             return self.alternative_memory.get_memory_context()  # Fallback to local memory context
-

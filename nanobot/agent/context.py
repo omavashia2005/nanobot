@@ -61,7 +61,7 @@ class ContextBuilder:
         # Memory context now uses supermemory for enhanced capabilities
         # Add current query to memory for context
 
-        memory = self.memory.get_memory_context(query=query)
+        memory = self.memory.get_context(query=query)
         if memory:
             parts.append(f"# Memory\n\n{memory}")
                         
