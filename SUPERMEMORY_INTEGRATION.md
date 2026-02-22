@@ -166,9 +166,4 @@ Session storage is managed by `SessionManager`:
 
 The test module is written to run on plain `pytest` (no async plugin required) by using `asyncio.run(...)` wrappers.
 
-## Current Implementation Notes
-
-- Some debug `print(...)` statements remain in Supermemory/context paths.
-- `SupermemoryStore` imports `os` but does not use it.
-- `PromptLibrary.build_identity_prompt(...)` currently ignores its `workspace` argument and uses `self.workspace_path` internally; docs above reflect the behavior as implemented.
 

@@ -16,6 +16,7 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.prompt_library import PromptLibrary
 from loguru import logger
 
+
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
@@ -26,14 +27,12 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, memory=MemoryStore):
         self.workspace = workspace
         self.config = load_config()
         
-        if self.config.supermemory.api_key: 
-            self.memory = SupermemoryStore(workspace)       # Use Supermemory for enhanced memory capabilities
-        else:
-            self.memory = MemoryStore(workspace)
+        
+        self.memory = memory
 
         self.skills = SkillsLoader(workspace)
 
@@ -101,7 +100,7 @@ class ContextBuilder:
         if isinstance(self.memory, SupermemoryStore):
             return self.prompt_library.build_identity_prompt_supermemory(now, tz, runtime)
             
-        return self.prompt_library.build_identity_prompt(now, tz, runtime, workspace_path)
+        return self.prompt_library.build_identity_prompt(now, tz, runtime)
 
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""

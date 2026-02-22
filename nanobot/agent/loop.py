@@ -71,7 +71,12 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        if load_config().supermemory.api_key:
+            self.memory = SupermemoryStore(workspace)
+        else:
+            self.memory = MemoryStore(workspace)
+
+        self.context = ContextBuilder(workspace, self.memory)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -86,10 +91,6 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
         )
         
-        if load_config().supermemory.api_key:
-            self.memory = SupermemoryStore(workspace)
-        else:
-            self.memory = MemoryStore(workspace)
         
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -302,7 +303,7 @@ class AgentLoop:
             if isinstance(self.memory, SupermemoryStore):
                 try:
                     
-                    response = self.memory.update_conversation(messages, session)
+                    response = await self.memory.update_conversation(messages, session)
                     
                     if response:
                         logger.info(f"Conversation uploaded to Supermemory for session {session.key}")

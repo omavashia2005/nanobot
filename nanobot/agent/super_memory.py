@@ -7,7 +7,6 @@ from typing import List
 import requests
 from nanobot.session import Session, SessionManager
 from nanobot.utils.helpers import ensure_dir
-import os
 import json
 import time
 
@@ -43,7 +42,7 @@ class SupermemoryStore():
                 if i % 3 == 0:
                     time.sleep(2)  # Sleep to avoid hitting rate limits
                 
-                self.update_conversation(messages, None)  # Pass None for session since we're not saving failed sessions here
+                await self.update_conversation(messages, None)  # Pass None for session since we're not saving failed sessions here
 
                 logger.info(f"Parsed messages from failed session file: {session_file}")
                 
@@ -57,7 +56,7 @@ class SupermemoryStore():
                 logger.error(f"Error deleting failed session file {session_file}: {e}")
         
     
-    def update_conversation(self, messages : List[dict], session : Session | None) -> bool:
+    async def update_conversation(self, messages : List[dict], session : Session | None) -> bool:
 
         """
             TODO: 
